@@ -157,6 +157,10 @@ describe("SubscribePage free-trial badges", () => {
     const button = await screen.findByRole("button", { name: "Subscribe" });
     button.click();
 
+    // Signature follows the terms dialog (#subscribe-confirm), not the click.
+    await screen.findByRole("dialog", { name: "Confirm your subscription" });
+    screen.getByRole("button", { name: "Confirm and sign" }).click();
+
     await vi.waitFor(() => expect(payflowMock.subscribe).toHaveBeenCalled());
     const notice = await screen.findByText(/Subscribed\./);
     expect(notice.parentElement?.textContent).toContain("14-day free trial");
@@ -169,6 +173,8 @@ describe("SubscribePage free-trial badges", () => {
 
     render(<SubscribePage />);
     (await screen.findByRole("button", { name: "Subscribe" })).click();
+    await screen.findByRole("dialog", { name: "Confirm your subscription" });
+    screen.getByRole("button", { name: "Confirm and sign" }).click();
 
     const notice = await screen.findByText(/Subscribed\./);
     expect(notice.parentElement?.textContent).not.toMatch(/free trial/i);

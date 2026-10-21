@@ -22,8 +22,9 @@ import {
 } from "@/lib/compare";
 import { metaFor, useTokenMetas } from "@/lib/token";
 import { filterAndSortPlans, type PlanPeriodOption, type PlanSortOption } from "@/lib/plans";
+import { confirmFacts, parseChargeLimit } from "@/lib/subscribe-confirm";
 import { formatUsdEstimate, formatUsdcEstimate, useXlmUsdPrice } from "@/lib/price";
-import { Empty, MerchantAccount, Notice, Panel, SkeletonPlanCards, TxLink } from "@/components/ui";
+import { Dialog, Empty, MerchantAccount, Notice, Panel, SkeletonPlanCards, TxLink } from "@/components/ui";
 
 /** Remaining seats in words, without inventing a count the source cannot provide. */
 function seatsLabel(plan: ApiPlan, now: number, tr: Translation): string {
@@ -144,7 +145,7 @@ function ComparisonTable({
 }
 
 function SubscribeInner() {
-  const { t: tr, formatPeriod, formatDate, formatWhen, translateMessage, formatTrialLength, trialBadge, formatTokenValue, formatUsdString, formatNumber } = useI18n();
+  const { t: tr, formatPeriod, formatDate, formatWhen, translateMessage, formatTrialLength, trialBadge, formatTokenValue, formatUsdString, formatNumber, formatFeeBps } = useI18n();
   const searchParams = useSearchParams();
   const sortParam = (searchParams?.get("sort") as PlanSortOption) || "newest";
   const periodParam = (searchParams?.get("period") as PlanPeriodOption) || "all";
@@ -163,6 +164,11 @@ function SubscribeInner() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [doneTrial, setDoneTrial] = useState<{ plan: string; seconds: number } | null>(null);
+  /** The plan whose terms are on screen awaiting confirmation; null = no dialog. */
+  const [confirming, setConfirming] = useState<ApiPlan | null>(null);
+  /** The contract's live fee rate for the dialog; null until read or if the read failed. */
+  const [feeBps, setFeeBps] = useState<number | null>(null);
+  const feeRequested = useRef(false);
   const { priceData: xlmPrice } = useXlmUsdPrice();
 
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
@@ -235,6 +241,58 @@ function SubscribeInner() {
     return () => clearInterval(timer);
   }, []);
 
+  /**
+   * Read the protocol fee once per session when the dialog first opens, not
+   * on mount: a visitor who never subscribes must not trigger a contract
+   * read. `config.readSource` is a funded account that exists on every
+   * deployment, so the read does not depend on the connected wallet — an
+   * account switched mid-load cannot turn it into a failure. A failed read
+   * resets the guard so the next open retries, and the dialog then shows the
+   * wallet-fallback wording rather than a number the contract may not charge.
+   */
+  function loadFeeBps() {
+    if (feeRequested.current) return;
+    feeRequested.current = true;
+    void payflow
+      .feeBps(config.readSource)
+      .then((bps) => setFeeBps(bps))
+      .catch(() => {
+        feeRequested.current = false;
+      });
+  }
+
+  /**
+   * Step one of two: the cheap preconditions, then the terms on screen.
+   * Nothing here asks the wallet for anything — the signature is requested
+   * only by `subscribe`, which runs from the dialog's Confirm button.
+   */
+  function openConfirm(plan: ApiPlan) {
+    if (!address) {
+      setError(tr("Connect a wallet first."));
+      return;
+    }
+    if (networkMismatch) {
+      setError(tr("Switch your wallet to the correct network first."));
+      return;
+    }
+    const blocked = planAvailability(plan).reason;
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
+    // The limit is validated before the dialog opens so a malformed value is
+    // corrected in the card's field, where it can still be edited — inside
+    // the dialog that field sits behind the focus trap.
+    const parsed = parseChargeLimit(maxCharges[plan.id]);
+    if (!parsed.ok) {
+      setError(parsed.message);
+      return;
+    }
+    setError(null);
+    setConfirming(plan);
+    loadFeeBps();
+  }
+
   async function subscribe(plan: ApiPlan) {
     if (!address) {
       setError(tr("Connect a wallet first."));
@@ -253,11 +311,11 @@ function SubscribeInner() {
     setError(null);
     setDone(null);
     try {
-      const raw = maxCharges[plan.id]?.trim();
-      const limit = raw ? Number(raw) : 0;
-      if (!Number.isInteger(limit) || limit < 0) {
-        throw new Error(tr("Charge limit must be a whole number, or 0 for open-ended."));
-      }
+      // Same parser the dialog validated against, so what the dialog showed
+      // is exactly what the contract is told.
+      const parsed = parseChargeLimit(maxCharges[plan.id]);
+      if (!parsed.ok) throw new Error(parsed.message);
+      const limit = parsed.limit;
       const latest = (await load()).find((p) => p.id === plan.id);
       if (walletState.current.address !== address || walletState.current.networkMismatch) {
         throw new Error(tr("Wallet changed. Check your wallet and try again."));
@@ -321,6 +379,13 @@ function SubscribeInner() {
   useEffect(() => {
     if (comparedPlans.length < 2) setShowComparison(false);
   }, [comparedPlans.length]);
+
+  // Facts for the confirmation dialog, derived from the plan as displayed.
+  // All three go null together with `confirming`, so the dialog cannot render
+  // with half its numbers.
+  const confirmingMeta = confirming ? metaFor(metas, confirming.token) : null;
+  const confirmingFacts = confirming ? confirmFacts(confirming, feeBps) : null;
+  const confirmingLimit = confirming ? parseChargeLimit(maxCharges[confirming.id]) : null;
 
   return (
     <div className="space-y-6">
@@ -555,7 +620,7 @@ function SubscribeInner() {
                         aria-describedby={availability.reason ? `availability-${plan.id}` : undefined}
                         onClick={(e) => {
                           e.stopPropagation();
-                          void subscribe(plan);
+                          openConfirm(plan);
                         }}
                       >
                         {busy === plan.id
@@ -573,6 +638,90 @@ function SubscribeInner() {
             </div>
           )}
         </div>
+      )}
+
+      {confirming && confirmingMeta && confirmingFacts && confirmingLimit && (
+        <Dialog
+          open
+          onClose={() => setConfirming(null)}
+          title={tr("Confirm your subscription")}
+          description={tr("A mandate lets the merchant charge your vault automatically for this plan.")}
+          actions={
+            <>
+              <button type="button" className="btn-ghost" onClick={() => setConfirming(null)}>
+                {tr("Cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy !== null}
+                onClick={() => {
+                  // Close first: the wallet popup owns the screen next, and a
+                  // signing error is reported by the page's error notice, not
+                  // by a dialog that would be sitting on top of it.
+                  const plan = confirming;
+                  setConfirming(null);
+                  void subscribe(plan);
+                }}
+              >
+                {busy !== null ? tr("Confirming…") : tr("Confirm and sign")}
+              </button>
+            </>
+          }
+        >
+          <dl className="space-y-2">
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-muted">{tr("Amount per charge")}</dt>
+              <dd className="text-right font-medium tabular-nums">
+                {formatTokenValue(confirmingFacts.amount, 4, confirmingMeta.decimals)}{" "}
+                {confirmingMeta.symbol}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-muted">{tr("Billing period")}</dt>
+              <dd className="text-right">{formatPeriod(confirming.period)}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-muted">{tr("Protocol fee")}</dt>
+              <dd className="text-right tabular-nums">
+                {confirmingFacts.fee === null || confirmingFacts.feeBps === null ? (
+                  tr("Shown in your wallet when you confirm")
+                ) : (
+                  <>
+                    {formatTokenValue(confirmingFacts.fee, 4, confirmingMeta.decimals)}{" "}
+                    {confirmingMeta.symbol} ({formatFeeBps(confirmingFacts.feeBps)})
+                  </>
+                )}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-muted">{tr("Charge limit")}</dt>
+              <dd className="text-right">
+                {confirmingLimit.ok && confirmingLimit.limit > 0
+                  ? tr("Up to {0} charges", { 0: confirmingLimit.limit })
+                  : tr("Open-ended (no fixed number of charges)")}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-muted">{tr("First charge")}</dt>
+              <dd className="text-right">
+                {confirmingFacts.firstChargeDelay > 0
+                  ? tr(
+                      "Your free trial runs for {0} — nothing is charged until it ends, so the first charge is due {0} from now.",
+                      { 0: formatTrialLength(confirmingFacts.firstChargeDelay) },
+                    )
+                  : tr("Due now — the first charge is taken as soon as you confirm and sign.")}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-muted">
+            {tr("How to cancel: open your")}{" "}
+            <Link href="/account" className="text-accent hover:underline">
+              {tr("account page")}
+            </Link>{" "}
+            {tr("and cancel there — the next charge is skipped as soon as you cancel.")}
+          </p>
+        </Dialog>
       )}
     </div>
   );

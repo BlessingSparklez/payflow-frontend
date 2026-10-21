@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { PlanPageClient } from "@/app/plans/[id]/PlanPageClient";
 import SubscribePage from "@/app/subscribe/page";
 import type { ApiPlan } from "@/lib/api";
 
-const mocks = vi.hoisted(() => ({ plans: vi.fn(), chain: vi.fn(), subscribe: vi.fn(),
+const mocks = vi.hoisted(() => ({ plans: vi.fn(), chain: vi.fn(), subscribe: vi.fn(), feeBps: vi.fn(),
   wallet: { address: "wallet-a" as string | null, networkMismatch: false, signXdr: vi.fn() } }));
 vi.mock("@/lib/api", () => ({ api: { plans: mocks.plans, mandatesFor: async () => ({ mandates: [] }) } }));
 vi.mock("@/lib/chain", () => ({ chainPlans: mocks.chain }));
-vi.mock("@/lib/payflow", () => ({ payflow: { subscribe: mocks.subscribe } }));
+vi.mock("@/lib/payflow", () => ({ payflow: { subscribe: mocks.subscribe, feeBps: mocks.feeBps } }));
 vi.mock("@/lib/wallet", () => ({ useWallet: () => mocks.wallet }));
 vi.mock("@/lib/token", () => ({ useTokenMetas: () => ({}), metaFor: () => ({ symbol: "XLM", decimals: 7 }) }));
 const plan = (extra: Partial<ApiPlan> = {}): ApiPlan => ({ id: 1, merchant: "merchant", name: "Cohort", token: "token", amount: "10000000", period: 86400, active: 1, ledger: 0, ...extra });
@@ -18,8 +18,15 @@ beforeEach(() => {
   mocks.wallet.address = "wallet-a";
   mocks.wallet.networkMismatch = false;
   mocks.subscribe.mockResolvedValue("a".repeat(64));
+  mocks.feeBps.mockResolvedValue(100);
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
+
+/** The subscribe page now gates the signature behind its terms dialog. */
+async function confirmDialog() {
+  const dialog = await screen.findByRole("dialog", { name: "Confirm your subscription" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Confirm and sign" }));
+}
 
 it.each(["api", "chain"])("blocks full and expired plans through %s", async (source) => {
   const plans = [plan({ max_subscribers: 2, subscriber_count: 2 }), plan({ id: 2, name: "Expired", available_until: 1 })];
@@ -48,6 +55,7 @@ it("leaves legacy/unlimited plans unchanged", async () => {
   await screen.findByText("Unlimited");
   expect(screen.queryByText(/seats|Available until/)).toBeNull();
   fireEvent.click(screen.getAllByRole("button", { name: "Subscribe" })[0]!);
+  await confirmDialog();
   await vi.waitFor(() => expect(mocks.subscribe).toHaveBeenCalledTimes(1));
 });
 it("explains missing count support", async () => {
@@ -70,6 +78,7 @@ it("rechecks seats before submitting", async () => {
     .mockResolvedValue({ plans: [plan({ max_subscribers: 1, subscriber_count: 1 })] });
   render(<SubscribePage />);
   fireEvent.click(await screen.findByRole("button", { name: "Subscribe" }));
+  await confirmDialog();
   await screen.findByText("0 seats left");
   expect(mocks.subscribe).not.toHaveBeenCalled();
 });
@@ -89,6 +98,7 @@ it("does not submit after an account switch during the final read", async () => 
   mocks.plans.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
   const view = render(<SubscribePage />);
   fireEvent.click(await screen.findByRole("button", { name: "Subscribe" }));
+  await confirmDialog();
   const oldFinish = finish;
   mocks.wallet.address = "wallet-b";
   view.rerender(<SubscribePage />);
@@ -126,6 +136,7 @@ it("does not sign when the plan expires during simulation", async () => {
   });
   render(<SubscribePage />);
   fireEvent.click(await screen.findByRole("button", { name: "Subscribe" }));
+  await confirmDialog();
   expect(await screen.findByText(/closed to new subscriptions/)).toBeTruthy();
   expect(mocks.wallet.signXdr).not.toHaveBeenCalled();
   vi.restoreAllMocks();

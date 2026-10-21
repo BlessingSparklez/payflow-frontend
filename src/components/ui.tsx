@@ -305,6 +305,7 @@ export function Dialog({
   open,
   onClose,
   title,
+  description,
   children,
   actions,
 }: {
@@ -312,12 +313,15 @@ export function Dialog({
   onClose: () => void;
   /** Names the dialog through `aria-labelledby`; read out when focus arrives. */
   title: string;
+  /** Optional context announced after the title through `aria-describedby`. */
+  description?: ReactNode;
   children: ReactNode;
   /** The confirmation controls, right-aligned under the content. */
   actions?: ReactNode;
 }) {
   const { t: tr } = useI18n();
   const titleId = useId();
+  const descriptionId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   // The handler is read through a ref so that an inline `onClose={() => …}` —
   // the natural way to call this — cannot re-run the effect below. A dialog
@@ -402,6 +406,7 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className="panel max-h-full w-full max-w-lg overflow-y-auto"
       >
@@ -428,6 +433,11 @@ export function Dialog({
             </svg>
           </button>
         </div>
+        {description && (
+          <p id={descriptionId} className="mb-3 text-sm text-muted">
+            {description}
+          </p>
+        )}
         <div className="text-sm">{children}</div>
         {actions && <div className="mt-4 flex flex-wrap justify-end gap-2">{actions}</div>}
       </div>
