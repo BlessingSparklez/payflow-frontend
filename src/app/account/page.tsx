@@ -778,6 +778,7 @@ function AccountInner() {
             </button>
           }
         >{tr("Connect a wallet to see your vault balance, fund it, and manage your subscriptions. Nothing is sent to the network until you approve a transaction in your wallet.")}</Empty>
+        <div title="Your vault is the contract account that holds funds waiting to be charged by the keeper."></div>
       </Panel>
     );
   }
@@ -1130,7 +1131,11 @@ function AccountInner() {
                 <Link href="/subscribe" className="btn-primary">{tr("Browse plans")}</Link>
               ) : undefined
             }
-          >{tr("Subscribing to a plan opens a mandate, and every mandate shows up here with its next charge date. You can pause or cancel any of them from this page.")}</Empty>
+          >
+            <div title="A mandate is the authorization to charge your vault for plan charges. It is signed once and cannot be repudiated.">
+              {tr("Subscribing to a plan opens a mandate, and every mandate shows up here with its next charge date. You can pause or cancel any of them from this page.")}
+            </div>
+          </Empty>
         ) : (
           <div className="space-y-3">
             {!isReadOnly && (
@@ -1248,7 +1253,7 @@ function AccountInner() {
                             )}
                           </div>
                         )}
-                        <div className="mt-1 text-xs text-muted">
+                        <div className="mt-1 text-xs text-muted" title="The maximum number of charges allowed for this mandate. Set to 0 for open-ended (no limit).">
                           {formatNumber(m.charges_made)}{" "}{tr("charge")}{m.charges_made === 1 ? "" :tr("s")}{" "}{tr("taken")}{m.max_charges > 0 &&tr(" of {0}", { "0": m.max_charges })}
                           {tr(" · next ")}
                           {m.status === "Active" ? <TimeAgo value={m.next_charge} /> : "—"}

@@ -391,7 +391,7 @@ function SubscribeInner() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{tr("Available plans")}</h1>
-        <p className="mt-1 text-sm text-muted">{tr("Subscribing opens a mandate. Fund your vault on the")}{" "}
+        <p className="mt-1 text-sm text-muted" title="A mandate is the authorization to charge your vault for plan charges. It is signed once and cannot be repudiated.">{tr("Subscribing opens a mandate. Fund your vault on the")}{" "}
           <Link href="/account" className="text-accent hover:underline">{tr("account page")}</Link>{" "}{tr("or charges will fail for lack of balance.")}</p>
       </div>
 
@@ -568,7 +568,7 @@ function SubscribeInner() {
                           )}
                         </div>
                         {badge && (
-                          <p className="mt-1 text-xs text-muted">{tr("Nothing is charged for")}{" "}{formatTrialLength(trialSeconds(plan))}{tr(". You can cancel any time before the first charge and pay nothing.")}</p>
+                          <p className="mt-1 text-xs text-muted" title="Keeper is the service that collects charges when a mandate falls due. If the keeper stops, you can settle yourself with Charge now.">{tr("Nothing is charged for")}{" "}{formatTrialLength(trialSeconds(plan))}{tr(". You can cancel any time before the first charge and pay nothing.")}</p>
                         )}
                       </div>
 
@@ -598,7 +598,7 @@ function SubscribeInner() {
                       </div>
 
                       <div>
-                        <label className="label" htmlFor={`limit-${plan.id}`}>{tr("Charge limit (0 = open-ended)")}</label>
+                        <label className="label" htmlFor={`limit-${plan.id}`} title="The maximum number of charges allowed. Set to 0 for open-ended (no limit).">{tr("Charge limit (0 = open-ended)")}</label>
                         <input
                           id={`limit-${plan.id}`}
                           className="input"
