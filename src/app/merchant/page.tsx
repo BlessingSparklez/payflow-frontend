@@ -7,6 +7,7 @@ import Link from "next/link";
 import { api, checkWebhookUrl, type ApiChargeAttempt, type ApiMandate, type ApiPlan, type ApiWebhook, type MerchantSummary, type StreamEvent } from "@/lib/api";
 import { RevenueChart } from "@/components/RevenueChart";
 import { WebhookDeliveryHistory } from "@/components/WebhookDeliveryHistory";
+import { CohortRetentionTable } from "@/components/CohortRetentionTable";
 import { buildCsv, downloadCsv, exportFilename, type ChargeRow } from "@/lib/csv";
 import { fillBuckets, parseRevenue, type BucketSize, type RevenuePoint } from "@/lib/revenue";
 import { parseMerchantChurn, type MerchantChurnMonth } from "@/lib/churn";
@@ -1388,6 +1389,11 @@ export default function MerchantPage() {
     <div className="space-y-6">
       <MerchantChurnPanel
         key={address}
+        merchant={address}
+        apiConfigured={api.isConfigured()}
+      />
+
+      <CohortRetentionTable
         merchant={address}
         apiConfigured={api.isConfigured()}
       />
